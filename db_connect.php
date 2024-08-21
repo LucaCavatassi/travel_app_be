@@ -30,8 +30,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
         $sql = "SELECT * FROM travels WHERE slug = '$slug'";
     } elseif (isset($_GET['locations'])) {
         // Fetch locations data
-        $travel_id = intval($_GET['locations']);
-        $sql = "SELECT * FROM locations WHERE travel_id = $travel_id";
+        if ($_GET['locations'] === 'all') {
+            $sql = "SELECT * FROM locations";  // Fetch all locations
+        } else {
+            $travel_id = intval($_GET['locations']);
+            $sql = "SELECT * FROM locations WHERE travel_id = $travel_id";
+        }
     } elseif (isset($_GET['foods'])) {
         // Fetch foods data
         $travel_id = intval($_GET['foods']);
