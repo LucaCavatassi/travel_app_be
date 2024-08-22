@@ -28,23 +28,30 @@ function createSlug($title) {
     return $slug;
 }
 
+
 // Function to insert locations
 function insertLocations($conn, $travelId, $locations) {
     foreach ($locations as $location) {
-        $name = $conn->real_escape_string($location['name']);
-        $lat = $conn->real_escape_string($location['lat']);
-        $lng = $conn->real_escape_string($location['lng']);
-        $rating = intval($location['rating']);
-        $is_done = intval($location['is_done']);
+        $name = isset($location['name']) ? $location['name'] : '';
+        $rating = isset($location['rating']) ? (int)$location['rating'] : 0;
+        $is_done = isset($location['is_done']) ? (bool)$location['is_done'] : false;
+        $lat = isset($location['lat']) && is_numeric($location['lat']) ? $location['lat'] : 0;
+        $long = isset($location['long']) && is_numeric($location['long']) ? $location['long'] : 0;
 
-        $sql = "INSERT INTO locations (travel_id, name, lat, lng, rating, is_done) 
-                VALUES ($travelId, '$name', '$lat', '$lng', $rating, $is_done)";
-        if (!$conn->query($sql)) {
-            echo json_encode(["error" => "Error inserting location: " . $conn->error]);
-            return false;
+        // Ensure lat and long are not null
+        if ($lat === null || $long === null) {
+            error_log("Error: Latitude and/or longitude not provided for location: $name");
+            continue; // Skip this location if lat or long are missing
+        }
+
+        // Prepare and execute the SQL statement
+        $stmt = $conn->prepare("INSERT INTO locations (travel_id, name, rating, is_done, lat, `long`) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("isiddd", $travelId, $name, $rating, $is_done, $lat, $long);
+
+        if (!$stmt->execute()) {
+            error_log('Insert Error: ' . $stmt->error);
         }
     }
-    return true;
 }
 
 // Function to insert foods
@@ -58,11 +65,9 @@ function insertFoods($conn, $travelId, $foods) {
         $sql = "INSERT INTO foods (travel_id, title, description, rating, is_done) 
                 VALUES ($travelId, '$title', '$description', $rating, $is_done)";
         if (!$conn->query($sql)) {
-            echo json_encode(["error" => "Error inserting food: " . $conn->error]);
-            return false;
+            throw new Exception("Error inserting food: " . $conn->error);
         }
     }
-    return true;
 }
 
 // Function to insert facts
@@ -75,11 +80,9 @@ function insertFacts($conn, $travelId, $facts) {
         $sql = "INSERT INTO facts (travel_id, title, description, is_done) 
                 VALUES ($travelId, '$title', '$description', $is_done)";
         if (!$conn->query($sql)) {
-            echo json_encode(["error" => "Error inserting fact: " . $conn->error]);
-            return false;
+            throw new Exception("Error inserting fact: " . $conn->error);
         }
     }
-    return true;
 }
 
 // Function to insert images
@@ -89,15 +92,12 @@ function insertImages($conn, $travelId, $files) {
         if (move_uploaded_file($files['tmp_name'][$i], $imageUrl)) {
             $sql = "INSERT INTO images (travel_id, image_url) VALUES ($travelId, '$imageUrl')";
             if (!$conn->query($sql)) {
-                echo json_encode(["error" => "Error inserting image: " . $conn->error]);
-                return false;
+                throw new Exception("Error inserting image: " . $conn->error);
             }
         } else {
-            echo json_encode(["error" => "Error uploading image."]);
-            return false;
+            throw new Exception("Error uploading image.");
         }
     }
-    return true;
 }
 
 // Handle GET and POST requests
@@ -154,33 +154,40 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     // Create slug from title
     $slug = createSlug($title);
 
-    // Insert travel data
-    $sql = "INSERT INTO travels (title, description, date, notes, slug) 
-            VALUES ('$title', '$description', '$date', '$notes', '$slug')";
-    if ($conn->query($sql) === TRUE) {
-        $travelId = $conn->insert_id;
+    // Begin transaction
+    $conn->begin_transaction();
 
-        // Insert associated data
-        $locations = isset($data['locations']) ? $data['locations'] : [];
-        $foods = isset($data['foods']) ? $data['foods'] : [];
-        $facts = isset($data['facts']) ? $data['facts'] : [];
+    try {
+        // Insert travel data
+        $sql = "INSERT INTO travels (title, description, date, notes, slug) 
+                VALUES ('$title', '$description', '$date', '$notes', '$slug')";
+        if ($conn->query($sql) === TRUE) {
+            $travelId = $conn->insert_id;
 
-        $success = insertLocations($conn, $travelId, $locations) &&
-                   insertFoods($conn, $travelId, $foods) &&
-                   insertFacts($conn, $travelId, $facts);
+            // Insert associated data
+            $locations = isset($data['locations']) ? $data['locations'] : [];
+            $foods = isset($data['foods']) ? $data['foods'] : [];
+            $facts = isset($data['facts']) ? $data['facts'] : [];
 
-        // Insert images
-        if ($success && isset($_FILES['images'])) {
-            $success = insertImages($conn, $travelId, $_FILES['images']);
-        }
+            insertLocations($conn, $travelId, $locations);
+            insertFoods($conn, $travelId, $foods);
+            insertFacts($conn, $travelId, $facts);
 
-        if ($success) {
+            // Insert images if available
+            if (isset($_FILES['images'])) {
+                insertImages($conn, $travelId, $_FILES['images']);
+            }
+
+            // Commit transaction
+            $conn->commit();
             echo json_encode(["success" => "New record created successfully."]);
         } else {
-            echo json_encode(["error" => "Failed to insert some data."]);
+            throw new Exception("Error inserting travel: " . $conn->error);
         }
-    } else {
-        echo json_encode(["error" => "Error inserting travel: " . $conn->error]);
+    } catch (Exception $e) {
+        // Rollback transaction in case of error
+        $conn->rollback();
+        echo json_encode(["error" => $e->getMessage()]);
     }
 }
 
