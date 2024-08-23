@@ -11,7 +11,7 @@ $conn = new mysqli($servername, $username, $password, $dbname, $port);
 
 // Check connection
 if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+    die(json_encode(["error" => "Connection failed: " . $conn->connect_error]));
 }
 
 // Set common headers
@@ -22,104 +22,140 @@ header('Content-Type: application/json');
 
 // Function to create a slug from a title
 function createSlug($title) {
-    $slug = strtolower($title);
-    $slug = preg_replace('/[^a-z0-9-]+/', '-', $slug);
-    $slug = trim($slug, '-');
-    return $slug;
+    return strtolower(trim(preg_replace('/[^a-z0-9]+/', '-', $title), '-'));
+}
+
+// Function to handle SQL prepare errors
+function handleSqlError($conn, $stmt) {
+    if ($stmt === false) {
+        error_log('Prepare Error: ' . $conn->error);
+        die(json_encode(["error" => "Database prepare error."]));
+    }
+}
+
+// Function to sanitize input
+function sanitizeInput($data) {
+    return htmlspecialchars(strip_tags($data));
 }
 
 // Function to insert or update locations
-function upsertLocations($conn, $travelId, $locations) {
+function saveLocations($conn, $travelId, $locations, $update = false) {
+    $query = $update
+        ? "UPDATE locations SET name = ?, rating = ?, is_done = ?, lat = ?, `long` = ? WHERE id = ? AND travel_id = ?"
+        : "INSERT INTO locations (travel_id, name, rating, is_done, lat, `long`) VALUES (?, ?, ?, ?, ?, ?)";
+        
+    $stmt = $conn->prepare($query);
+    handleSqlError($conn, $stmt);
+
     foreach ($locations as $location) {
-        $name = isset($location['name']) ? $location['name'] : '';
+        $name = $location['name'] ?? '';
         $rating = isset($location['rating']) ? (int)$location['rating'] : 0;
         $is_done = isset($location['is_done']) ? (bool)$location['is_done'] : false;
         $lat = isset($location['lat']) && is_numeric($location['lat']) ? $location['lat'] : 0;
         $long = isset($location['long']) && is_numeric($location['long']) ? $location['long'] : 0;
 
-        if ($lat === null || $long === null) {
-            error_log("Error: Latitude and/or longitude not provided for location: $name");
-            continue; // Skip this location if lat or long are missing
+        if ($update) {
+            $id = $location['id'] ?? 0;
+            $stmt->bind_param("siddiii", $name, $rating, $is_done, $lat, $long, $id, $travelId);
+        } else {
+            $stmt->bind_param("isiddd", $travelId, $name, $rating, $is_done, $lat, $long);
         }
-
-        // Prepare and execute the SQL statement
-        $stmt = $conn->prepare("INSERT INTO locations (travel_id, name, rating, is_done, lat, `long`) 
-            VALUES (?, ?, ?, ?, ?, ?) 
-            ON DUPLICATE KEY UPDATE 
-                name = VALUES(name), 
-                rating = VALUES(rating), 
-                is_done = VALUES(is_done), 
-                lat = VALUES(lat), 
-                `long` = VALUES(`long`)");
-        $stmt->bind_param("isiddd", $travelId, $name, $rating, $is_done, $lat, $long);
 
         if (!$stmt->execute()) {
-            error_log('Insert/Update Error: ' . $stmt->error);
+            error_log(($update ? 'Update' : 'Insert') . ' Error: ' . $stmt->error);
         }
     }
+
+    $stmt->close();
 }
 
 // Function to insert or update foods
-function upsertFoods($conn, $travelId, $foods) {
-    foreach ($foods as $food) {
-        $title = $conn->real_escape_string($food['title']);
-        $description = $conn->real_escape_string($food['description']);
-        $rating = intval($food['rating']);
-        $is_done = intval($food['is_done']);
+function saveFoods($conn, $travelId, $foods, $update = false) {
+    $query = $update
+        ? "UPDATE foods SET title = ?, description = ?, rating = ?, is_done = ? WHERE id = ? AND travel_id = ?"
+        : "INSERT INTO foods (travel_id, title, description, rating, is_done) VALUES (?, ?, ?, ?, ?)";
         
-        $sql = "INSERT INTO foods (travel_id, title, description, rating, is_done) 
-                VALUES ($travelId, '$title', '$description', $rating, $is_done)
-                ON DUPLICATE KEY UPDATE 
-                    title = VALUES(title), 
-                    description = VALUES(description), 
-                    rating = VALUES(rating), 
-                    is_done = VALUES(is_done)";
-        if (!$conn->query($sql)) {
-            throw new Exception("Error inserting/updating food: " . $conn->error);
+    $stmt = $conn->prepare($query);
+    handleSqlError($conn, $stmt);
+
+    foreach ($foods as $food) {
+        $title = $food['title'] ?? '';
+        $description = $food['description'] ?? '';
+        $rating = (int)($food['rating'] ?? 0);
+        $is_done = (int)($food['is_done'] ?? 0);
+
+        if ($update) {
+            $id = $food['id'] ?? 0;
+            $stmt->bind_param("ssiiii", $title, $description, $rating, $is_done, $id, $travelId);
+        } else {
+            $stmt->bind_param("issiii", $travelId, $title, $description, $rating, $is_done);
+        }
+
+        if (!$stmt->execute()) {
+            error_log(($update ? 'Update' : 'Insert') . ' Error: ' . $stmt->error);
         }
     }
+
+    $stmt->close();
 }
 
 // Function to insert or update facts
-function upsertFacts($conn, $travelId, $facts) {
-    foreach ($facts as $fact) {
-        $title = $conn->real_escape_string($fact['title']);
-        $description = $conn->real_escape_string($fact['description']);
-        $is_done = intval($fact['is_done']);
+function saveFacts($conn, $travelId, $facts, $update = false) {
+    $query = $update
+        ? "UPDATE facts SET title = ?, description = ?, is_done = ? WHERE id = ? AND travel_id = ?"
+        : "INSERT INTO facts (travel_id, title, description, is_done) VALUES (?, ?, ?, ?)";
         
-        $sql = "INSERT INTO facts (travel_id, title, description, is_done) 
-                VALUES ($travelId, '$title', '$description', $is_done)
-                ON DUPLICATE KEY UPDATE 
-                    title = VALUES(title), 
-                    description = VALUES(description), 
-                    is_done = VALUES(is_done)";
-        if (!$conn->query($sql)) {
-            throw new Exception("Error inserting/updating fact: " . $conn->error);
+    $stmt = $conn->prepare($query);
+    handleSqlError($conn, $stmt);
+
+    foreach ($facts as $fact) {
+        $title = $fact['title'] ?? '';
+        $description = $fact['description'] ?? '';
+        $is_done = (int)($fact['is_done'] ?? 0);
+
+        if ($update) {
+            $id = $fact['id'] ?? 0;
+            $stmt->bind_param("ssiii", $title, $description, $is_done, $id, $travelId);
+        } else {
+            $stmt->bind_param("issi", $travelId, $title, $description, $is_done);
+        }
+
+        if (!$stmt->execute()) {
+            error_log(($update ? 'Update' : 'Insert') . ' Error: ' . $stmt->error);
         }
     }
+
+    $stmt->close();
 }
 
-// Function to insert or update images
-function upsertImages($conn, $travelId, $files) {
+// Function to handle image uploads
+function handleImages($conn, $travelId, $files, $update = false) {
+    $query = $update
+        ? "INSERT INTO images (travel_id, image_url) VALUES (?, ?) ON DUPLICATE KEY UPDATE image_url = VALUES(image_url)"
+        : "INSERT INTO images (travel_id, image_url) VALUES (?, ?)";
+        
+    $stmt = $conn->prepare($query);
+    handleSqlError($conn, $stmt);
+
     for ($i = 0; $i < count($files['name']); $i++) {
         $imageUrl = 'uploads/' . basename($files['name'][$i]);
         if (move_uploaded_file($files['tmp_name'][$i], $imageUrl)) {
-            $sql = "INSERT INTO images (travel_id, image_url) VALUES ($travelId, '$imageUrl')
-                    ON DUPLICATE KEY UPDATE 
-                        image_url = VALUES(image_url)";
-            if (!$conn->query($sql)) {
-                throw new Exception("Error inserting/updating image: " . $conn->error);
+            $stmt->bind_param("is", $travelId, $imageUrl);
+
+            if (!$stmt->execute()) {
+                error_log(($update ? 'Update' : 'Insert') . ' Error: ' . $stmt->error);
             }
         } else {
-            throw new Exception("Error uploading image.");
+            error_log("Error uploading image: " . $files['name'][$i]);
         }
     }
+
+    $stmt->close();
 }
 
 // Handle GET requests
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     $data = [];
-
     if (isset($_GET['slug'])) {
         $slug = $conn->real_escape_string($_GET['slug']);
         $sql = "SELECT * FROM travels WHERE slug = '$slug'";
@@ -141,23 +177,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     }
 
     $result = $conn->query($sql);
-    if ($result->num_rows > 0) {
+    if ($result) {
         while ($row = $result->fetch_assoc()) {
             $data[] = $row;
         }
+        echo json_encode($data);
+    } else {
+        echo json_encode(["error" => "Query error: " . $conn->error]);
     }
 
-    echo json_encode($data);
-    
 } elseif ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // Handle POST request to insert new travel data
     $postData = file_get_contents('php://input');
     $data = json_decode($postData, true);
 
-    $title = isset($data['title']) ? $conn->real_escape_string($data['title']) : '';
-    $description = isset($data['description']) ? $conn->real_escape_string($data['description']) : '';
-    $date = isset($data['date']) ? $conn->real_escape_string($data['date']) : '';
-    $notes = isset($data['notes']) ? $conn->real_escape_string($data['notes']) : '';
+    $title = sanitizeInput($data['title'] ?? '');
+    $description = sanitizeInput($data['description'] ?? '');
+    $date = sanitizeInput($data['date'] ?? '');
+    $notes = sanitizeInput($data['notes'] ?? '');
 
     if (empty($title) || empty($description) || empty($date)) {
         echo json_encode(["error" => "Title, description, and date are required."]);
@@ -169,44 +206,44 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     $conn->begin_transaction();
 
     try {
-        $sql = "INSERT INTO travels (title, description, date, notes, slug) 
-                VALUES ('$title', '$description', '$date', '$notes', '$slug')";
-        if ($conn->query($sql) === TRUE) {
+        $stmt = $conn->prepare("INSERT INTO travels (title, description, date, notes, slug) VALUES (?, ?, ?, ?, ?)");
+        handleSqlError($conn, $stmt);
+        $stmt->bind_param("sssss", $title, $description, $date, $notes, $slug);
+        if ($stmt->execute()) {
             $travelId = $conn->insert_id;
 
-            $locations = isset($data['locations']) ? $data['locations'] : [];
-            $foods = isset($data['foods']) ? $data['foods'] : [];
-            $facts = isset($data['facts']) ? $data['facts'] : [];
+            // Insert associated data
+            saveLocations($conn, $travelId, $data['locations'] ?? []);
+            saveFoods($conn, $travelId, $data['foods'] ?? []);
+            saveFacts($conn, $travelId, $data['facts'] ?? []);
 
-            upsertLocations($conn, $travelId, $locations);
-            upsertFoods($conn, $travelId, $foods);
-            upsertFacts($conn, $travelId, $facts);
-
+            // Insert images if available
             if (isset($_FILES['images'])) {
-                upsertImages($conn, $travelId, $_FILES['images']);
+                handleImages($conn, $travelId, $_FILES['images']);
             }
 
             $conn->commit();
             echo json_encode(["success" => "New record created successfully."]);
         } else {
-            throw new Exception("Error inserting travel: " . $conn->error);
+            throw new Exception("Error inserting travel: " . $stmt->error);
         }
     } catch (Exception $e) {
         $conn->rollback();
         echo json_encode(["error" => $e->getMessage()]);
     }
-} elseif ($_SERVER['REQUEST_METHOD'] == 'PUT') {
-    // Handle PUT request to update existing travel data
-    parse_str(file_get_contents('php://input'), $putData);
 
-    $travelId = isset($putData['id']) ? intval($putData['id']) : 0;
-    $title = isset($putData['title']) ? $conn->real_escape_string($putData['title']) : '';
-    $description = isset($putData['description']) ? $conn->real_escape_string($putData['description']) : '';
-    $date = isset($putData['date']) ? $conn->real_escape_string($putData['date']) : '';
-    $notes = isset($putData['notes']) ? $conn->real_escape_string($putData['notes']) : '';
-    
-    if (empty($travelId) || empty($title) || empty($description) || empty($date)) {
-        echo json_encode(["error" => "ID, title, description, and date are required."]);
+} elseif ($_SERVER['REQUEST_METHOD'] == 'PUT') {
+    // Read the raw input from the PUT request
+    $putData = json_decode(file_get_contents('php://input'), true);
+
+    $travelId = intval($putData['id'] ?? 0);
+    $title = sanitizeInput($putData['title'] ?? '');
+    $description = sanitizeInput($putData['description'] ?? '');
+    $date = sanitizeInput($putData['date'] ?? '');
+    $notes = sanitizeInput($putData['notes'] ?? '');
+
+    if ($travelId <= 0 || empty($title) || empty($description) || empty($date)) {
+        echo json_encode(["error" => "Travel ID, title, description, and date are required."]);
         exit;
     }
 
@@ -215,26 +252,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     $conn->begin_transaction();
 
     try {
-        $sql = "UPDATE travels 
-                SET title='$title', description='$description', date='$date', notes='$notes', slug='$slug' 
-                WHERE id=$travelId";
-        if ($conn->query($sql) === TRUE) {
-            $locations = isset($putData['locations']) ? $putData['locations'] : [];
-            $foods = isset($putData['foods']) ? $putData['foods'] : [];
-            $facts = isset($putData['facts']) ? $putData['facts'] : [];
-
-            upsertLocations($conn, $travelId, $locations);
-            upsertFoods($conn, $travelId, $foods);
-            upsertFacts($conn, $travelId, $facts);
+        $stmt = $conn->prepare("UPDATE travels SET title = ?, description = ?, date = ?, notes = ?, slug = ? WHERE id = ?");
+        handleSqlError($conn, $stmt);
+        $stmt->bind_param("sssssi", $title, $description, $date, $notes, $slug, $travelId);
+        if ($stmt->execute()) {
+            saveLocations($conn, $travelId, $putData['locations'] ?? [], true);
+            saveFoods($conn, $travelId, $putData['foods'] ?? [], true);
+            saveFacts($conn, $travelId, $putData['facts'] ?? [], true);
 
             if (isset($_FILES['images'])) {
-                upsertImages($conn, $travelId, $_FILES['images']);
+                handleImages($conn, $travelId, $_FILES['images'], true);
             }
 
             $conn->commit();
             echo json_encode(["success" => "Record updated successfully."]);
         } else {
-            throw new Exception("Error updating travel: " . $conn->error);
+            throw new Exception("Error updating travel: " . $stmt->error);
         }
     } catch (Exception $e) {
         $conn->rollback();
@@ -242,6 +275,4 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     }
 }
 
-// Close the connection
 $conn->close();
-?>
