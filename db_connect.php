@@ -16,7 +16,7 @@ if ($conn->connect_error) {
 
 // Set common headers
 header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS");
+header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
 header('Content-Type: application/json');
 
@@ -268,6 +268,41 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
             echo json_encode(["success" => "Record updated successfully."]);
         } else {
             throw new Exception("Error updating travel: " . $stmt->error);
+        }
+    } catch (Exception $e) {
+        $conn->rollback();
+        echo json_encode(["error" => $e->getMessage()]);
+    }
+}elseif ($_SERVER['REQUEST_METHOD'] == 'DELETE') {
+    // Read the raw input from the DELETE request
+    parse_str(file_get_contents('php://input'), $deleteData);
+
+    $travelId = intval($deleteData['id'] ?? 0);
+
+    if ($travelId <= 0) {
+        echo json_encode(["error" => "Travel ID is required."]);
+        exit;
+    }
+
+    $conn->begin_transaction();
+
+    try {
+        // Delete associated data first
+        $conn->query("DELETE FROM locations WHERE travel_id = $travelId");
+        $conn->query("DELETE FROM foods WHERE travel_id = $travelId");
+        $conn->query("DELETE FROM facts WHERE travel_id = $travelId");
+        $conn->query("DELETE FROM images WHERE travel_id = $travelId");
+
+        // Now delete the travel record
+        $stmt = $conn->prepare("DELETE FROM travels WHERE id = ?");
+        handleSqlError($conn, $stmt);
+        $stmt->bind_param("i", $travelId);
+
+        if ($stmt->execute()) {
+            $conn->commit();
+            echo json_encode(["success" => "Record deleted successfully."]);
+        } else {
+            throw new Exception("Error deleting travel: " . $stmt->error);
         }
     } catch (Exception $e) {
         $conn->rollback();
