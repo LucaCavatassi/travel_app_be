@@ -129,29 +129,47 @@ function saveFacts($conn, $travelId, $facts, $update = false) {
 }
 
 // Function to handle image uploads
-function handleImages($conn, $travelId, $files, $update = false) {
-    $query = $update
-        ? "INSERT INTO images (travel_id, image_url) VALUES (?, ?) ON DUPLICATE KEY UPDATE image_url = VALUES(image_url)"
-        : "INSERT INTO images (travel_id, image_url) VALUES (?, ?)";
-        
-    $stmt = $conn->prepare($query);
-    handleSqlError($conn, $stmt);
-
-    for ($i = 0; $i < count($files['name']); $i++) {
-        $imageUrl = 'uploads/' . basename($files['name'][$i]);
-        if (move_uploaded_file($files['tmp_name'][$i], $imageUrl)) {
-            $stmt->bind_param("is", $travelId, $imageUrl);
-
-            if (!$stmt->execute()) {
-                error_log(($update ? 'Update' : 'Insert') . ' Error: ' . $stmt->error);
-            }
-        } else {
-            error_log("Error uploading image: " . $files['name'][$i]);
-        }
+function handleImages($conn, $travelId) {
+    if (!isset($_FILES['images']) || empty($_FILES['images']['name'][0])) {
+        return; // No images to process
     }
 
-    $stmt->close();
+    $images = $_FILES['images'];
+    var_dump($images);
+    $imageCount = count($images['name']);
+
+    $uploadDir = 'uploads/';
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0777, true);
+    }
+
+    foreach ($images['name'] as $index => $imageName) {
+        if ($images['error'][$index] === UPLOAD_ERR_OK) {
+            $tmpName = $images['tmp_name'][$index];
+            $fileName = 'image_' . time() . '_' . $index . '_' . basename($imageName);
+            $imagePath = $uploadDir . $fileName;
+
+            if (move_uploaded_file($tmpName, $imagePath)) {
+                // Store only the filename in the database
+                $fileNameOnly = basename($fileName);
+                
+                $stmt = $conn->prepare("INSERT INTO images (travel_id, image_url) VALUES (?, ?)");
+                handleSqlError($conn, $stmt);
+                $stmt->bind_param("is", $travelId, $fileNameOnly);
+
+                if (!$stmt->execute()) {
+                    error_log('Insert Image Error: ' . $stmt->error);
+                }
+                $stmt->close();
+            } else {
+                error_log("Error moving uploaded file: " . $imageName);
+            }
+        } else {
+            error_log("Error uploading file: " . $images['name'][$index]);
+        }
+    }
 }
+
 
 // Handle GET requests
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
@@ -218,9 +236,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
             saveFacts($conn, $travelId, $data['facts'] ?? []);
 
             // Insert images if available
-            if (isset($_FILES['images'])) {
-                handleImages($conn, $travelId, $_FILES['images']);
-            }
+            handleImages($conn, $travelId);
 
             $conn->commit();
             echo json_encode(["success" => "New record created successfully."]);
@@ -261,7 +277,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
             saveFacts($conn, $travelId, $putData['facts'] ?? [], true);
 
             if (isset($_FILES['images'])) {
-                handleImages($conn, $travelId, $_FILES['images'], true);
+                handleImages($conn, $travelId);
             }
 
             $conn->commit();
