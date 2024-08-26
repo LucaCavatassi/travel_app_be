@@ -22,7 +22,25 @@ header('Content-Type: application/json');
 
 // Function to create a slug from a title
 function createSlug($title) {
-    return strtolower(trim(preg_replace('/[^a-z0-9]+/', '-', $title), '-'));
+    global $conn; // Assuming you have a global $conn for database connection
+
+    // Convert the title to lowercase and replace spaces with hyphens
+    $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $title), '-'));
+
+    // Check if the slug already exists in the database
+    $stmt = $conn->prepare("SELECT COUNT(*) FROM travels WHERE slug = ?");
+    $stmt->bind_param("s", $slug);
+    $stmt->execute();
+    $stmt->bind_result($count);
+    $stmt->fetch();
+    $stmt->close();
+
+    // If the slug exists, append a unique identifier
+    if ($count > 0) {
+        $slug .= '-' . uniqid();
+    }
+
+    return $slug;
 }
 
 // Function to handle SQL prepare errors
@@ -166,6 +184,28 @@ function handleImages($conn, $travelId) {
     }
 }
 
+function removeImage($conn, $imageName) {
+    $imagePath = 'uploads/' . $imageName;
+
+    if (file_exists($imagePath)) {
+        unlink($imagePath);
+    }
+
+    $stmt = $conn->prepare("DELETE FROM images WHERE image_url = ?");
+    handleSqlError($conn, $stmt);
+    $stmt->bind_param("s", $imageName);
+
+    if (!$stmt->execute()) {
+        error_log('Delete Image Error: ' . $stmt->error);
+    }
+    $stmt->close();
+}
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['image'])) {
+    $imageName = $_POST['image'];
+    removeImage($conn, $imageName);
+}
+
 // Handle GET requests
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     $data = [];
@@ -185,7 +225,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     } elseif (isset($_GET['facts'])) {
         $travel_id = (int)$_GET['facts'];
         $sql = "SELECT * FROM facts WHERE travel_id = $travel_id";
-    } else {
+    }elseif (isset($_GET['images'])) {
+        $travel_id = (int)$_GET['images'];
+        $sql = "SELECT * FROM images WHERE travel_id = $travel_id";}    
+    else {
         $sql = "SELECT * FROM travels";
     }
 
@@ -325,6 +368,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
                 saveFacts($conn, $travelId, $facts, true);
             }
 
+            // Handle Images
+            if (!empty($_FILES['images'])) {
+                handleImages($conn, $travelId);
+            }
+            
             // Commit transaction
             $conn->commit();
             echo json_encode(["success" => "Travel entry updated successfully."]);
