@@ -263,19 +263,32 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     }
 
 } elseif ($_SERVER['REQUEST_METHOD'] == 'PUT') {
-    // Handle PUT request to update travel data
-    parse_str(file_get_contents("php://input"), $_PUT);
-    $travelId = $_PUT['id'] ?? 0;
-    $title = $_PUT['title'] ?? '';
-    $description = $_PUT['description'] ?? '';
-    $date = $_PUT['date'] ?? '';
-    $notes = $_PUT['notes'] ?? '';
+    // Get raw POST data
+    $rawData = file_get_contents("php://input");
 
+    // Decode JSON data
+    $data = json_decode($rawData, true);
+
+    // Check for JSON decoding errors
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        echo json_encode(["error" => "Invalid JSON format"]);
+        exit;
+    }
+
+    // Extract fields from decoded data
+    $travelId = $data['id'] ?? 0;
+    $title = $data['title'] ?? '';
+    $description = $data['description'] ?? '';
+    $date = $data['date'] ?? '';
+    $notes = $data['notes'] ?? '';
+
+    // Validate required fields
     if (empty($travelId) || empty($title) || empty($description) || empty($date)) {
         echo json_encode(["error" => "ID, title, description, and date are required."]);
         exit;
     }
 
+    // Sanitize input
     $travelId = (int)$travelId;
     $title = sanitizeInput($title);
     $description = sanitizeInput($description);
@@ -283,9 +296,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     $notes = sanitizeInput($notes);
     $slug = createSlug($title);
 
+    // Begin transaction
     $conn->begin_transaction();
 
     try {
+        // Prepare and execute update statement
         $stmt = $conn->prepare("UPDATE travels SET title = ?, description = ?, date = ?, notes = ?, slug = ? WHERE id = ?");
         handleSqlError($conn, $stmt);
 
@@ -293,36 +308,38 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
 
         if ($stmt->execute()) {
             // Handle Locations
-            if (!empty($_PUT['locations'])) {
-                $locations = json_decode($_PUT['locations'], true);
+            if (!empty($data['locations'])) {
+                $locations = $data['locations'];
                 saveLocations($conn, $travelId, $locations, true);
             }
 
             // Handle Foods
-            if (!empty($_PUT['foods'])) {
-                $foods = json_decode($_PUT['foods'], true);
+            if (!empty($data['foods'])) {
+                $foods = $data['foods'];
                 saveFoods($conn, $travelId, $foods, true);
             }
 
             // Handle Facts
-            if (!empty($_PUT['facts'])) {
-                $facts = json_decode($_PUT['facts'], true);
+            if (!empty($data['facts'])) {
+                $facts = $data['facts'];
                 saveFacts($conn, $travelId, $facts, true);
             }
 
+            // Commit transaction
             $conn->commit();
             echo json_encode(["success" => "Travel entry updated successfully."]);
         } else {
+            // Rollback transaction on failure
             $conn->rollback();
             echo json_encode(["error" => "Failed to update travel entry."]);
         }
 
         $stmt->close();
     } catch (Exception $e) {
+        // Rollback transaction on exception
         $conn->rollback();
         echo json_encode(["error" => "Transaction failed: " . $e->getMessage()]);
     }
-
 } elseif ($_SERVER['REQUEST_METHOD'] == 'DELETE') {
     // Handle DELETE request to remove a travel entry
     parse_str(file_get_contents("php://input"), $_DELETE);
