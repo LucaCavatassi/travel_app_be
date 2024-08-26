@@ -222,43 +222,65 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     try {
         $stmt = $conn->prepare("INSERT INTO travels (title, description, date, notes, slug) VALUES (?, ?, ?, ?, ?)");
         handleSqlError($conn, $stmt);
+
         $stmt->bind_param("sssss", $title, $description, $date, $notes, $slug);
+
         if ($stmt->execute()) {
-            $travelId = $conn->insert_id;
+            $travelId = $stmt->insert_id;
 
-            // Insert associated data
-            saveLocations($conn, $travelId, $_POST['locations'] ?? []);
-            saveFoods($conn, $travelId, $_POST['foods'] ?? []);
-            saveFacts($conn, $travelId, $_POST['facts'] ?? []);
+            // Handle Locations
+            if (!empty($_POST['locations'])) {
+                $locations = json_decode($_POST['locations'], true);
+                saveLocations($conn, $travelId, $locations);
+            }
 
-            // Insert images if available
+            // Handle Foods
+            if (!empty($_POST['foods'])) {
+                $foods = json_decode($_POST['foods'], true);
+                saveFoods($conn, $travelId, $foods);
+            }
+
+            // Handle Facts
+            if (!empty($_POST['facts'])) {
+                $facts = json_decode($_POST['facts'], true);
+                saveFacts($conn, $travelId, $facts);
+            }
+
+            // Handle Images
             handleImages($conn, $travelId);
 
             $conn->commit();
-            echo json_encode(["success" => "New record created successfully."]);
+            echo json_encode(["success" => "New travel entry created successfully.", "slug" => $slug]);
         } else {
-            throw new Exception("Error inserting travel: " . $stmt->error);
+            $conn->rollback();
+            echo json_encode(["error" => "Failed to insert travel entry."]);
         }
+
+        $stmt->close();
     } catch (Exception $e) {
         $conn->rollback();
-        echo json_encode(["error" => $e->getMessage()]);
+        echo json_encode(["error" => "Transaction failed: " . $e->getMessage()]);
     }
 
 } elseif ($_SERVER['REQUEST_METHOD'] == 'PUT') {
-    // Read the raw input from the PUT request
-    parse_str(file_get_contents('php://input'), $putData);
+    // Handle PUT request to update travel data
+    parse_str(file_get_contents("php://input"), $_PUT);
+    $travelId = $_PUT['id'] ?? 0;
+    $title = $_PUT['title'] ?? '';
+    $description = $_PUT['description'] ?? '';
+    $date = $_PUT['date'] ?? '';
+    $notes = $_PUT['notes'] ?? '';
 
-    $travelId = (int)($putData['id'] ?? 0);
-    $title = sanitizeInput($putData['title'] ?? '');
-    $description = sanitizeInput($putData['description'] ?? '');
-    $date = sanitizeInput($putData['date'] ?? '');
-    $notes = sanitizeInput($putData['notes'] ?? '');
-
-    if ($travelId <= 0 || empty($title) || empty($description) || empty($date)) {
-        echo json_encode(["error" => "Travel ID, title, description, and date are required."]);
+    if (empty($travelId) || empty($title) || empty($description) || empty($date)) {
+        echo json_encode(["error" => "ID, title, description, and date are required."]);
         exit;
     }
 
+    $travelId = (int)$travelId;
+    $title = sanitizeInput($title);
+    $description = sanitizeInput($description);
+    $date = sanitizeInput($date);
+    $notes = sanitizeInput($notes);
     $slug = createSlug($title);
 
     $conn->begin_transaction();
@@ -266,61 +288,64 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     try {
         $stmt = $conn->prepare("UPDATE travels SET title = ?, description = ?, date = ?, notes = ?, slug = ? WHERE id = ?");
         handleSqlError($conn, $stmt);
-        $stmt->bind_param("sssssi", $title, $description, $date, $notes, $slug, $travelId);
-        if ($stmt->execute()) {
-            saveLocations($conn, $travelId, $putData['locations'] ?? [], true);
-            saveFoods($conn, $travelId, $putData['foods'] ?? [], true);
-            saveFacts($conn, $travelId, $putData['facts'] ?? [], true);
 
-            if (isset($_FILES['images'])) {
-                handleImages($conn, $travelId);
+        $stmt->bind_param("sssssi", $title, $description, $date, $notes, $slug, $travelId);
+
+        if ($stmt->execute()) {
+            // Handle Locations
+            if (!empty($_PUT['locations'])) {
+                $locations = json_decode($_PUT['locations'], true);
+                saveLocations($conn, $travelId, $locations, true);
+            }
+
+            // Handle Foods
+            if (!empty($_PUT['foods'])) {
+                $foods = json_decode($_PUT['foods'], true);
+                saveFoods($conn, $travelId, $foods, true);
+            }
+
+            // Handle Facts
+            if (!empty($_PUT['facts'])) {
+                $facts = json_decode($_PUT['facts'], true);
+                saveFacts($conn, $travelId, $facts, true);
             }
 
             $conn->commit();
-            echo json_encode(["success" => "Record updated successfully."]);
+            echo json_encode(["success" => "Travel entry updated successfully."]);
         } else {
-            throw new Exception("Error updating travel: " . $stmt->error);
+            $conn->rollback();
+            echo json_encode(["error" => "Failed to update travel entry."]);
         }
+
+        $stmt->close();
     } catch (Exception $e) {
         $conn->rollback();
-        echo json_encode(["error" => $e->getMessage()]);
+        echo json_encode(["error" => "Transaction failed: " . $e->getMessage()]);
     }
 
 } elseif ($_SERVER['REQUEST_METHOD'] == 'DELETE') {
-    // Read the raw input from the DELETE request
-    parse_str(file_get_contents('php://input'), $deleteData);
+    // Handle DELETE request to remove a travel entry
+    parse_str(file_get_contents("php://input"), $_DELETE);
+    $travelId = (int)($_DELETE['id'] ?? 0);
 
-    $travelId = (int)($deleteData['id'] ?? 0);
-
-    if ($travelId <= 0) {
+    if (empty($travelId)) {
         echo json_encode(["error" => "Travel ID is required."]);
         exit;
     }
 
-    $conn->begin_transaction();
+    $stmt = $conn->prepare("DELETE FROM travels WHERE id = ?");
+    handleSqlError($conn, $stmt);
 
-    try {
-        // Delete associated data first
-        $conn->query("DELETE FROM locations WHERE travel_id = $travelId");
-        $conn->query("DELETE FROM foods WHERE travel_id = $travelId");
-        $conn->query("DELETE FROM facts WHERE travel_id = $travelId");
-        $conn->query("DELETE FROM images WHERE travel_id = $travelId");
+    $stmt->bind_param("i", $travelId);
 
-        // Now delete the travel record
-        $stmt = $conn->prepare("DELETE FROM travels WHERE id = ?");
-        handleSqlError($conn, $stmt);
-        $stmt->bind_param("i", $travelId);
-
-        if ($stmt->execute()) {
-            $conn->commit();
-            echo json_encode(["success" => "Record deleted successfully."]);
-        } else {
-            throw new Exception("Error deleting travel: " . $stmt->error);
-        }
-    } catch (Exception $e) {
-        $conn->rollback();
-        echo json_encode(["error" => $e->getMessage()]);
+    if ($stmt->execute()) {
+        echo json_encode(["success" => "Travel entry deleted successfully."]);
+    } else {
+        echo json_encode(["error" => "Failed to delete travel entry."]);
     }
+
+    $stmt->close();
 }
 
 $conn->close();
+?>
