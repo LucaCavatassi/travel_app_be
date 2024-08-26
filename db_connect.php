@@ -49,13 +49,13 @@ function saveLocations($conn, $travelId, $locations, $update = false) {
 
     foreach ($locations as $location) {
         $name = $location['name'] ?? '';
-        $rating = isset($location['rating']) ? (int)$location['rating'] : 0;
-        $is_done = isset($location['is_done']) ? (bool)$location['is_done'] : false;
-        $lat = isset($location['lat']) && is_numeric($location['lat']) ? $location['lat'] : 0;
-        $long = isset($location['long']) && is_numeric($location['long']) ? $location['long'] : 0;
+        $rating = (int)($location['rating'] ?? 0);
+        $is_done = (bool)($location['is_done'] ?? false);
+        $lat = (float)($location['lat'] ?? 0);
+        $long = (float)($location['long'] ?? 0);
 
         if ($update) {
-            $id = $location['id'] ?? 0;
+            $id = (int)($location['id'] ?? 0);
             $stmt->bind_param("siddiii", $name, $rating, $is_done, $lat, $long, $id, $travelId);
         } else {
             $stmt->bind_param("isiddd", $travelId, $name, $rating, $is_done, $lat, $long);
@@ -85,10 +85,10 @@ function saveFoods($conn, $travelId, $foods, $update = false) {
         $is_done = (int)($food['is_done'] ?? 0);
 
         if ($update) {
-            $id = $food['id'] ?? 0;
+            $id = (int)($food['id'] ?? 0);
             $stmt->bind_param("ssiiii", $title, $description, $rating, $is_done, $id, $travelId);
         } else {
-            $stmt->bind_param("issiii", $travelId, $title, $description, $rating, $is_done);
+            $stmt->bind_param("issii", $travelId, $title, $description, $rating, $is_done);
         }
 
         if (!$stmt->execute()) {
@@ -114,7 +114,7 @@ function saveFacts($conn, $travelId, $facts, $update = false) {
         $is_done = (int)($fact['is_done'] ?? 0);
 
         if ($update) {
-            $id = $fact['id'] ?? 0;
+            $id = (int)($fact['id'] ?? 0);
             $stmt->bind_param("ssiii", $title, $description, $is_done, $id, $travelId);
         } else {
             $stmt->bind_param("issi", $travelId, $title, $description, $is_done);
@@ -130,15 +130,14 @@ function saveFacts($conn, $travelId, $facts, $update = false) {
 
 // Function to handle image uploads
 function handleImages($conn, $travelId) {
-    if (!isset($_FILES['images']) || empty($_FILES['images']['name'][0])) {
+    if (empty($_FILES['images']['name'][0])) {
         return; // No images to process
     }
 
     $images = $_FILES['images'];
-    var_dump($images);
     $imageCount = count($images['name']);
-
     $uploadDir = 'uploads/';
+
     if (!is_dir($uploadDir)) {
         mkdir($uploadDir, 0777, true);
     }
@@ -150,12 +149,9 @@ function handleImages($conn, $travelId) {
             $imagePath = $uploadDir . $fileName;
 
             if (move_uploaded_file($tmpName, $imagePath)) {
-                // Store only the filename in the database
-                $fileNameOnly = basename($fileName);
-                
                 $stmt = $conn->prepare("INSERT INTO images (travel_id, image_url) VALUES (?, ?)");
                 handleSqlError($conn, $stmt);
-                $stmt->bind_param("is", $travelId, $fileNameOnly);
+                $stmt->bind_param("is", $travelId, $fileName);
 
                 if (!$stmt->execute()) {
                     error_log('Insert Image Error: ' . $stmt->error);
@@ -170,7 +166,6 @@ function handleImages($conn, $travelId) {
     }
 }
 
-
 // Handle GET requests
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     $data = [];
@@ -181,14 +176,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
         if ($_GET['locations'] === 'all') {
             $sql = "SELECT * FROM locations";
         } else {
-            $travel_id = intval($_GET['locations']);
+            $travel_id = (int)$_GET['locations'];
             $sql = "SELECT * FROM locations WHERE travel_id = $travel_id";
         }
     } elseif (isset($_GET['foods'])) {
-        $travel_id = intval($_GET['foods']);
+        $travel_id = (int)$_GET['foods'];
         $sql = "SELECT * FROM foods WHERE travel_id = $travel_id";
     } elseif (isset($_GET['facts'])) {
-        $travel_id = intval($_GET['facts']);
+        $travel_id = (int)$_GET['facts'];
         $sql = "SELECT * FROM facts WHERE travel_id = $travel_id";
     } else {
         $sql = "SELECT * FROM travels";
@@ -206,19 +201,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
 
 } elseif ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // Handle POST request to insert new travel data
-    $postData = file_get_contents('php://input');
-    $data = json_decode($postData, true);
-
-    $title = sanitizeInput($data['title'] ?? '');
-    $description = sanitizeInput($data['description'] ?? '');
-    $date = sanitizeInput($data['date'] ?? '');
-    $notes = sanitizeInput($data['notes'] ?? '');
+    $title = $_POST['title'] ?? '';
+    $description = $_POST['description'] ?? '';
+    $date = $_POST['date'] ?? '';
+    $notes = $_POST['notes'] ?? '';
 
     if (empty($title) || empty($description) || empty($date)) {
         echo json_encode(["error" => "Title, description, and date are required."]);
         exit;
     }
 
+    $title = sanitizeInput($title);
+    $description = sanitizeInput($description);
+    $date = sanitizeInput($date);
+    $notes = sanitizeInput($notes);
     $slug = createSlug($title);
 
     $conn->begin_transaction();
@@ -231,9 +227,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
             $travelId = $conn->insert_id;
 
             // Insert associated data
-            saveLocations($conn, $travelId, $data['locations'] ?? []);
-            saveFoods($conn, $travelId, $data['foods'] ?? []);
-            saveFacts($conn, $travelId, $data['facts'] ?? []);
+            saveLocations($conn, $travelId, $_POST['locations'] ?? []);
+            saveFoods($conn, $travelId, $_POST['foods'] ?? []);
+            saveFacts($conn, $travelId, $_POST['facts'] ?? []);
 
             // Insert images if available
             handleImages($conn, $travelId);
@@ -250,9 +246,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
 
 } elseif ($_SERVER['REQUEST_METHOD'] == 'PUT') {
     // Read the raw input from the PUT request
-    $putData = json_decode(file_get_contents('php://input'), true);
+    parse_str(file_get_contents('php://input'), $putData);
 
-    $travelId = intval($putData['id'] ?? 0);
+    $travelId = (int)($putData['id'] ?? 0);
     $title = sanitizeInput($putData['title'] ?? '');
     $description = sanitizeInput($putData['description'] ?? '');
     $date = sanitizeInput($putData['date'] ?? '');
@@ -289,11 +285,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
         $conn->rollback();
         echo json_encode(["error" => $e->getMessage()]);
     }
-}elseif ($_SERVER['REQUEST_METHOD'] == 'DELETE') {
+
+} elseif ($_SERVER['REQUEST_METHOD'] == 'DELETE') {
     // Read the raw input from the DELETE request
     parse_str(file_get_contents('php://input'), $deleteData);
 
-    $travelId = intval($deleteData['id'] ?? 0);
+    $travelId = (int)($deleteData['id'] ?? 0);
 
     if ($travelId <= 0) {
         echo json_encode(["error" => "Travel ID is required."]);
