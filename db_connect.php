@@ -23,7 +23,6 @@ header('Content-Type: application/json');
 // Function to create a slug from a title
 function createSlug($title) {
     global $conn; // Assuming you have a global $conn for database connection
-
     // Convert the title to lowercase and replace spaces with hyphens
     $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $title), '-'));
 
@@ -58,92 +57,96 @@ function sanitizeInput($data) {
 
 // Function to insert or update locations
 function saveLocations($conn, $travelId, $locations, $update = false) {
-    $query = $update
-        ? "UPDATE locations SET name = ?, rating = ?, is_done = ?, lat = ?, `long` = ? WHERE id = ? AND travel_id = ?"
-        : "INSERT INTO locations (travel_id, name, rating, is_done, lat, `long`) VALUES (?, ?, ?, ?, ?, ?)";
-        
-    $stmt = $conn->prepare($query);
-    handleSqlError($conn, $stmt);
-
     foreach ($locations as $location) {
         $name = $location['name'] ?? '';
         $rating = (int)($location['rating'] ?? 0);
-        $is_done = (bool)($location['is_done'] ?? false);
+        $is_done = (int)($location['is_done'] ?? 0);
         $lat = (float)($location['lat'] ?? 0);
         $long = (float)($location['long'] ?? 0);
+        $id = (int)($location['id'] ?? 0);
 
-        if ($update) {
-            $id = (int)($location['id'] ?? 0);
+        if ($update && $id > 0) {
+            // Update existing location
+            $stmt = $conn->prepare("UPDATE locations SET name = ?, rating = ?, is_done = ?, lat = ?, `long` = ? WHERE id = ? AND travel_id = ?");
+            if (!$stmt) {
+                throw new Exception('Prepare Statement Error (Locations Update): ' . $conn->error);
+            }
             $stmt->bind_param("siddiii", $name, $rating, $is_done, $lat, $long, $id, $travelId);
         } else {
+            // Insert new location
+            $stmt = $conn->prepare("INSERT INTO locations (travel_id, name, rating, is_done, lat, `long`) VALUES (?, ?, ?, ?, ?, ?)");
+            if (!$stmt) {
+                throw new Exception('Prepare Statement Error (Locations Insert): ' . $conn->error);
+            }
             $stmt->bind_param("isiddd", $travelId, $name, $rating, $is_done, $lat, $long);
         }
 
         if (!$stmt->execute()) {
-            error_log(($update ? 'Update' : 'Insert') . ' Error: ' . $stmt->error);
+            throw new Exception('Execute Statement Error (Locations): ' . $stmt->error);
         }
+        $stmt->close();
     }
-
-    $stmt->close();
 }
-
-// Function to insert or update foods
 function saveFoods($conn, $travelId, $foods, $update = false) {
-    $query = $update
-        ? "UPDATE foods SET title = ?, description = ?, rating = ?, is_done = ? WHERE id = ? AND travel_id = ?"
-        : "INSERT INTO foods (travel_id, title, description, rating, is_done) VALUES (?, ?, ?, ?, ?)";
-        
-    $stmt = $conn->prepare($query);
-    handleSqlError($conn, $stmt);
-
     foreach ($foods as $food) {
         $title = $food['title'] ?? '';
         $description = $food['description'] ?? '';
         $rating = (int)($food['rating'] ?? 0);
         $is_done = (int)($food['is_done'] ?? 0);
+        $id = (int)($food['id'] ?? 0);
 
-        if ($update) {
-            $id = (int)($food['id'] ?? 0);
+        if ($update && $id > 0) {
+            // Update existing food
+            $stmt = $conn->prepare("UPDATE foods SET title = ?, description = ?, rating = ?, is_done = ? WHERE id = ? AND travel_id = ?");
+            if (!$stmt) {
+                throw new Exception('Prepare Statement Error (Foods Update): ' . $conn->error);
+            }
             $stmt->bind_param("ssiiii", $title, $description, $rating, $is_done, $id, $travelId);
         } else {
+            // Insert new food
+            $stmt = $conn->prepare("INSERT INTO foods (travel_id, title, description, rating, is_done) VALUES (?, ?, ?, ?, ?)");
+            if (!$stmt) {
+                throw new Exception('Prepare Statement Error (Foods Insert): ' . $conn->error);
+            }
             $stmt->bind_param("issii", $travelId, $title, $description, $rating, $is_done);
         }
 
         if (!$stmt->execute()) {
-            error_log(($update ? 'Update' : 'Insert') . ' Error: ' . $stmt->error);
+            throw new Exception('Execute Statement Error (Foods): ' . $stmt->error);
         }
+        $stmt->close();
     }
-
-    $stmt->close();
 }
 
 // Function to insert or update facts
 function saveFacts($conn, $travelId, $facts, $update = false) {
-    $query = $update
-        ? "UPDATE facts SET title = ?, description = ?, is_done = ? WHERE id = ? AND travel_id = ?"
-        : "INSERT INTO facts (travel_id, title, description, is_done) VALUES (?, ?, ?, ?)";
-        
-    $stmt = $conn->prepare($query);
-    handleSqlError($conn, $stmt);
-
     foreach ($facts as $fact) {
         $title = $fact['title'] ?? '';
         $description = $fact['description'] ?? '';
         $is_done = (int)($fact['is_done'] ?? 0);
+        $id = (int)($fact['id'] ?? 0);
 
-        if ($update) {
-            $id = (int)($fact['id'] ?? 0);
+        if ($update && $id > 0) {
+            // Update existing fact
+            $stmt = $conn->prepare("UPDATE facts SET title = ?, description = ?, is_done = ? WHERE id = ? AND travel_id = ?");
+            if (!$stmt) {
+                throw new Exception('Prepare Statement Error (Facts Update): ' . $conn->error);
+            }
             $stmt->bind_param("ssiii", $title, $description, $is_done, $id, $travelId);
         } else {
+            // Insert new fact
+            $stmt = $conn->prepare("INSERT INTO facts (travel_id, title, description, is_done) VALUES (?, ?, ?, ?)");
+            if (!$stmt) {
+                throw new Exception('Prepare Statement Error (Facts Insert): ' . $conn->error);
+            }
             $stmt->bind_param("issi", $travelId, $title, $description, $is_done);
         }
 
         if (!$stmt->execute()) {
-            error_log(($update ? 'Update' : 'Insert') . ' Error: ' . $stmt->error);
+            throw new Exception('Execute Statement Error (Facts): ' . $stmt->error);
         }
+        $stmt->close();
     }
-
-    $stmt->close();
 }
 
 // Function to handle image uploads
@@ -183,8 +186,82 @@ function handleImages($conn, $travelId) {
         }
     }
 }
+// Function to get PUT data
+function getPutData() {
+    $rawInput = file_get_contents('php://input');
+    $data = json_decode($rawInput, true);
+    
+    if (json_last_error() === JSON_ERROR_NONE) {
+        return $data;
+    }
 
+    error_log('JSON Decode Error: ' . json_last_error_msg());
+    return [];
+}
 
+function updateTravel($conn, $data) {
+    error_log('Raw PUT Data: ' . print_r($data, true));
+
+    // Ensure 'id' is present
+    if (!isset($data['id']) || empty($data['id'])) {
+        error_log('ID not found in PUT data.');
+        echo json_encode(["success" => false, "message" => "ID not found"]);
+        return;
+    }
+
+    $travelId = (int)$data['id'];
+    error_log('Received travelId: ' . $travelId);
+
+    // Ensure 'title' is present
+    if (!isset($data['title']) || empty($data['title'])) {
+        error_log('Title not found in PUT data.');
+        echo json_encode(["success" => false, "message" => "Title not found"]);
+        return;
+    }
+
+    $title = $data['title'];
+    $slug = createSlug($title);
+
+    // Start transaction
+    $conn->begin_transaction();
+
+    try {
+        // Update travel details including slug
+        $stmt = $conn->prepare("UPDATE travels SET title = ?, description = ?, date = ?, notes = ?, slug = ? WHERE id = ?");
+        if (!$stmt) {
+            throw new Exception('Prepare Statement Error: ' . $conn->error);
+        }
+
+        $stmt->bind_param("sssssi", $title, $data['description'], $data['date'], $data['notes'], $slug, $travelId);
+
+        if (!$stmt->execute()) {
+            throw new Exception('Execute Statement Error (Travels Update): ' . $stmt->error);
+        }
+        $stmt->close();
+
+        // Update locations
+        saveLocations($conn, $travelId, $data['locations'] ?? [], true);
+
+        // Update foods
+        saveFoods($conn, $travelId, $data['foods'] ?? [], true);
+
+        // Update facts
+        saveFacts($conn, $travelId, $data['facts'] ?? [], true);
+
+        // If all updates succeed, commit the transaction
+        $conn->commit();
+
+        echo json_encode(["success" => true, "slug" => $slug]);
+
+    } catch (Exception $e) {
+        // Rollback transaction if any of the updates fail
+        $conn->rollback();
+
+        // Log the error and return a failure message
+        error_log('Transaction failed: ' . $e->getMessage());
+        echo json_encode(["success" => false, "message" => "Update failed. Transaction rolled back."]);
+    }
+}
 
 // Handle GET requests
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
@@ -285,90 +362,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
         echo json_encode(["error" => "Transaction failed: " . $e->getMessage()]);
     }
 
-} elseif ($_SERVER['REQUEST_METHOD'] == 'PUT') {
-    // Get raw POST data
-    $rawData = file_get_contents("php://input");
-
-    // Decode JSON data
-    $data = json_decode($rawData, true);
-
-    // Check for JSON decoding errors
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        echo json_encode(["error" => "Invalid JSON format"]);
-        exit;
-    }
-
-    // Extract fields from decoded data
-    $travelId = $data['id'] ?? 0;
-    $title = $data['title'] ?? '';
-    $description = $data['description'] ?? '';
-    $date = $data['date'] ?? '';
-    $notes = $data['notes'] ?? '';
-
-    // Validate required fields
-    if (empty($travelId) || empty($title) || empty($description) || empty($date)) {
-        echo json_encode(["error" => "ID, title, description, and date are required."]);
-        exit;
-    }
-
-    // Sanitize input
-    $travelId = (int)$travelId;
-    $title = sanitizeInput($title);
-    $description = sanitizeInput($description);
-    $date = sanitizeInput($date);
-    $notes = sanitizeInput($notes);
-    $slug = createSlug($title);
-
-    // Begin transaction
-    $conn->begin_transaction();
-
-    try {
-        // Prepare and execute update statement
-        $stmt = $conn->prepare("UPDATE travels SET title = ?, description = ?, date = ?, notes = ?, slug = ? WHERE id = ?");
-        handleSqlError($conn, $stmt);
-
-        $stmt->bind_param("sssssi", $title, $description, $date, $notes, $slug, $travelId);
-
-        if ($stmt->execute()) {
-            // Handle Locations
-            if (!empty($data['locations'])) {
-                $locations = $data['locations'];
-                saveLocations($conn, $travelId, $locations, true);
-            }
-
-            // Handle Foods
-            if (!empty($data['foods'])) {
-                $foods = $data['foods'];
-                saveFoods($conn, $travelId, $foods, true);
-            }
-
-            // Handle Facts
-            if (!empty($data['facts'])) {
-                $facts = $data['facts'];
-                saveFacts($conn, $travelId, $facts, true);
-            }
-
-            // Handle Images
-            if (!empty($_FILES['images'])) {
-                handleImages($conn, $travelId);
-            }
-            
-            // Commit transaction
-            $conn->commit();
-            echo json_encode(["success" => "Travel entry updated successfully."]);
-        } else {
-            // Rollback transaction on failure
-            $conn->rollback();
-            echo json_encode(["error" => "Failed to update travel entry."]);
-        }
-
-        $stmt->close();
-    } catch (Exception $e) {
-        // Rollback transaction on exception
-        $conn->rollback();
-        echo json_encode(["error" => "Transaction failed: " . $e->getMessage()]);
-    }
-} elseif ($_SERVER['REQUEST_METHOD'] == 'DELETE') {
+}elseif($_SERVER['REQUEST_METHOD'] === 'PUT') {
+    $data = getPutData();
+    updateTravel($conn, $data);
+}elseif ($_SERVER['REQUEST_METHOD'] == 'DELETE') {
     // Handle DELETE request to remove a travel entry
     parse_str(file_get_contents("php://input"), $_DELETE);
     $travelId = (int)($_DELETE['id'] ?? 0);
