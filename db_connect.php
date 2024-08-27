@@ -378,18 +378,60 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
         exit;
     }
 
-    $stmt = $conn->prepare("DELETE FROM travels WHERE id = ?");
-    handleSqlError($conn, $stmt);
+    // Begin a transaction
+    $conn->begin_transaction();
 
-    $stmt->bind_param("i", $travelId);
+    try {
+        // First delete related images
+        $stmt = $conn->prepare("DELETE FROM images WHERE travel_id = ?");
+        handleSqlError($conn, $stmt);
+        $stmt->bind_param("i", $travelId);
+        if (!$stmt->execute()) {
+            throw new Exception("Failed to delete images.");
+        }
+        $stmt->close();
 
-    if ($stmt->execute()) {
+        $stmt = $conn->prepare("DELETE FROM locations WHERE travel_id = ?");
+        handleSqlError($conn, $stmt);
+        $stmt->bind_param("i", $travelId);
+        if (!$stmt->execute()) {
+            throw new Exception("Failed to delete locations.");
+        }
+        $stmt->close();
+
+        $stmt = $conn->prepare("DELETE FROM foods WHERE travel_id = ?");
+        handleSqlError($conn, $stmt);
+        $stmt->bind_param("i", $travelId);
+        if (!$stmt->execute()) {
+            throw new Exception("Failed to delete foods.");
+        }
+        $stmt->close();
+
+        $stmt = $conn->prepare("DELETE FROM facts WHERE travel_id = ?");
+        handleSqlError($conn, $stmt);
+        $stmt->bind_param("i", $travelId);
+        if (!$stmt->execute()) {
+            throw new Exception("Failed to delete facts.");
+        }
+        $stmt->close();
+
+        // Then delete the travel entry
+        $stmt = $conn->prepare("DELETE FROM travels WHERE id = ?");
+        handleSqlError($conn, $stmt);
+        $stmt->bind_param("i", $travelId);
+        if (!$stmt->execute()) {
+            throw new Exception("Failed to delete travel entry.");
+        }
+        $stmt->close();
+
+        // Commit the transaction
+        $conn->commit();
         echo json_encode(["success" => "Travel entry deleted successfully."]);
-    } else {
-        echo json_encode(["error" => "Failed to delete travel entry."]);
+    } catch (Exception $e) {
+        // Rollback the transaction in case of error
+        $conn->rollback();
+        echo json_encode(["error" => $e->getMessage()]);
     }
-
-    $stmt->close();
 }
 
 $conn->close();
