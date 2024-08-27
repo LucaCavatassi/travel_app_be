@@ -148,44 +148,6 @@ function saveFacts($conn, $travelId, $facts, $update = false) {
         $stmt->close();
     }
 }
-
-// Function to handle image uploads
-function handleImages($conn, $travelId) {
-    if (empty($_FILES['images']['name'][0])) {
-        return; // No images to process
-    }
-
-    $images = $_FILES['images'];
-    $imageCount = count($images['name']);
-    $uploadDir = 'uploads/';
-
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0777, true);
-    }
-
-    foreach ($images['name'] as $index => $imageName) {
-        if ($images['error'][$index] === UPLOAD_ERR_OK) {
-            $tmpName = $images['tmp_name'][$index];
-            $fileName = 'image_' . time() . '_' . $index . '_' . basename($imageName);
-            $imagePath = $uploadDir . $fileName;
-
-            if (move_uploaded_file($tmpName, $imagePath)) {
-                $stmt = $conn->prepare("INSERT INTO images (travel_id, image_url) VALUES (?, ?)");
-                handleSqlError($conn, $stmt);
-                $stmt->bind_param("is", $travelId, $fileName);
-
-                if (!$stmt->execute()) {
-                    error_log('Insert Image Error: ' . $stmt->error);
-                }
-                $stmt->close();
-            } else {
-                error_log("Error moving uploaded file: " . $imageName);
-            }
-        } else {
-            error_log("Error uploading file: " . $images['name'][$index]);
-        }
-    }
-}
 // Function to get PUT data
 function getPutData() {
     $rawInput = file_get_contents('php://input');
@@ -199,12 +161,15 @@ function getPutData() {
     return [];
 }
 
-function updateTravel($conn, $data) {
-    error_log('Raw PUT Data: ' . print_r($data, true));
+function updateTravel($conn) {
+    error_log('Raw JSON Data: ' . file_get_contents('php://input'));
+
+    // Read the JSON payload
+    $data = json_decode(file_get_contents('php://input'), true);
 
     // Ensure 'id' is present
     if (!isset($data['id']) || empty($data['id'])) {
-        error_log('ID not found in PUT data.');
+        error_log('ID not found in JSON data.');
         echo json_encode(["success" => false, "message" => "ID not found"]);
         return;
     }
@@ -214,7 +179,7 @@ function updateTravel($conn, $data) {
 
     // Ensure 'title' is present
     if (!isset($data['title']) || empty($data['title'])) {
-        error_log('Title not found in PUT data.');
+        error_log('Title not found in JSON data.');
         echo json_encode(["success" => false, "message" => "Title not found"]);
         return;
     }
@@ -248,6 +213,9 @@ function updateTravel($conn, $data) {
         // Update facts
         saveFacts($conn, $travelId, $data['facts'] ?? [], true);
 
+        // Handle images
+        handleImages($conn, $travelId, $data['images'] ?? []);
+
         // If all updates succeed, commit the transaction
         $conn->commit();
 
@@ -260,6 +228,53 @@ function updateTravel($conn, $data) {
         // Log the error and return a failure message
         error_log('Transaction failed: ' . $e->getMessage());
         echo json_encode(["success" => false, "message" => "Update failed. Transaction rolled back."]);
+    }
+}
+
+function handleImages($conn, $travelId, $images) {
+    // Directory where images will be stored
+    $uploadDir = 'uploads/images/';
+    
+    // Create the directory if it does not exist
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0755, true);
+    }
+
+    foreach ($images as $imageData) {
+        // Extract base64 data
+        if (preg_match('/^data:image\/(\w+);base64,/', $imageData, $type)) {
+            $type = strtolower($type[1]); // jpeg, png, gif
+            $imageData = substr($imageData, strpos($imageData, ',') + 1);
+            $imageData = base64_decode($imageData);
+
+            if ($imageData === false) {
+                throw new Exception('Base64 decode failed.');
+            }
+
+            // Generate a unique file name
+            $fileName = uniqid() . '.' . $type;
+            $filePath = $uploadDir . $fileName;
+
+            // Save the image file
+            if (file_put_contents($filePath, $imageData) === false) {
+                throw new Exception('Failed to write file.');
+            }
+
+            // Store file information in the database
+            $stmt = $conn->prepare("INSERT INTO travel_images (travel_id, image_path) VALUES (?, ?)");
+            if (!$stmt) {
+                throw new Exception('Prepare Statement Error (Image Insert): ' . $conn->error);
+            }
+
+            $stmt->bind_param("is", $travelId, $filePath);
+
+            if (!$stmt->execute()) {
+                throw new Exception('Execute Statement Error (Image Insert): ' . $stmt->error);
+            }
+            $stmt->close();
+        } else {
+            throw new Exception('Invalid image data format.');
+        }
     }
 }
 
