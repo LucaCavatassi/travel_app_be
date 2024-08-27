@@ -184,27 +184,7 @@ function handleImages($conn, $travelId) {
     }
 }
 
-function removeImage($conn, $imageName) {
-    $imagePath = 'uploads/' . $imageName;
 
-    if (file_exists($imagePath)) {
-        unlink($imagePath);
-    }
-
-    $stmt = $conn->prepare("DELETE FROM images WHERE image_url = ?");
-    handleSqlError($conn, $stmt);
-    $stmt->bind_param("s", $imageName);
-
-    if (!$stmt->execute()) {
-        error_log('Delete Image Error: ' . $stmt->error);
-    }
-    $stmt->close();
-}
-
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['image'])) {
-    $imageName = $_POST['image'];
-    removeImage($conn, $imageName);
-}
 
 // Handle GET requests
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
