@@ -1,10 +1,10 @@
 <?php
 // Database connection settings
-$servername = "127.0.0.1";
-$username = "root";
-$password = "root";
-$dbname = "travel_app_db";
-$port = 8889;
+$servername = "gre.h.filess.io";
+$username = "travelApp_biggerjack";
+$password = "a5fe397f6bc80ceb53a9efdf16883c060ed35796";
+$dbname = "travelApp";
+$port = 3307;
 
 // Create connection
 $conn = new mysqli($servername, $username, $password, $dbname, $port);
