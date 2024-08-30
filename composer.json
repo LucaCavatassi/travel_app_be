@@ -1,5 +1,5 @@
 {
-    "name": "travel-app",
-    "description": "A simple PHP app",
+    "name": "luca/travel-app",
+    "description": "Travel-App Back-end",
     "require": {}
 }
